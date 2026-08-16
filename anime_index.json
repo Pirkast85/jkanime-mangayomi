@@ -1,7 +1,7 @@
 [
   {
-    "name": "JKAnime",
-    "id": 9000000101,
+    "name": "JKAnime Comunidad",
+    "id": 9000000102,
     "baseUrl": "https://jkanime.net",
     "lang": "es",
     "typeSource": "single",
@@ -12,7 +12,7 @@
     "hasCloudflare": true,
     "sourceCodeUrl": "https://raw.githubusercontent.com/Pirkast85/jkanime-mangayomi/main/extensions/jkanime.js",
     "apiUrl": "",
-    "version": "0.3.0",
+    "version": "0.4.0",
     "isManga": false,
     "itemType": 1,
     "isFullData": false,
