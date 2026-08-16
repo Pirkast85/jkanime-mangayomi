@@ -1,22 +1,228 @@
-const client = new Client();
-const BASE_URL = "https://jkanime.net";
-const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36";
-function headers(referer){return {"User-Agent":UA,"Referer":referer||BASE_URL+"/","Accept":"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"};}
-function abs(u,b){if(!u)return "";if(/^https?:\/\//i.test(u))return u;if(u.startsWith("//"))return "https:"+u;if(u.startsWith("/"))return BASE_URL+u;return (b||BASE_URL+"/").replace(/\/[^/]*$/,"/")+u;}
-function clean(s){return(s||"").replace(/\s+/g," ").trim();}
-function dec(s){return(s||"").replace(/&amp;/g,"&").replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&#x27;/gi,"'").replace(/&lt;/g,"<").replace(/&gt;/g,">");}
-async function doc(u,r){const x=await client.get(u,headers(r));return new Document(x.body);}
-function img(el){const i=el&&el.selectFirst("img");return i?abs(i.attr("data-src")||i.attr("data-lazy-src")||i.attr("src")):"";}
-function item(el){const a=el.selectFirst("h2.portada-title a")||el.selectFirst("a.let-link")||el.selectFirst("a");if(!a||!a.attr("href"))return null;return{name:clean(a.attr("title")||a.text),url:abs(a.attr("href")),link:abs(a.attr("href")),imageUrl:img(el)};}
-async function listing(u){const d=await doc(u),o=[];d.select("div.portada-box").forEach(e=>{const x=item(e);if(x&&x.name)o.push(x);});return o;}
-async function getPopular(page){page=Number(page||1);const l=await listing(page===1?BASE_URL+"/":BASE_URL+"/pagina/"+page+"/");return{list:l,hasNextPage:l.length>0};}
-async function getLatest(page){return getPopular(page);}
-async function search(q,page){const s=encodeURIComponent(clean(q));let l=[];for(const u of [BASE_URL+"/buscar/"+s+"/",BASE_URL+"/buscar/"+s+"/"+Number(page||1)+"/"]){try{l=await listing(u);if(l.length)break;}catch(_){}}return{list:l,hasNextPage:l.length>0};}
-function epHref(h){const m=(h||"").match(/\/([^/?#]+)\/(\d+)\/?$/);return m?{slug:m[1],number:Number(m[2])}:null;}
-function stat(s){s=clean(s).toLowerCase();if(s.includes("final")||s.includes("complet"))return 1;if(s.includes("cancel"))return 3;if(s.includes("paus"))return 2;if(s.includes("emision")||s.includes("emisión")||s.includes("ongoing"))return 0;return 5;}
-async function getDetail(u){const d=await doc(u),t=d.selectFirst("h1")||d.selectFirst(".serie-title"),sy=d.selectFirst(".sinopsis-box p.pc")||d.selectFirst(".sinopsis-box p")||d.selectFirst("#ainfo p"),g=[],e=[],seen={};d.select("a").forEach(a=>{const h=a.attr("href")||"",p=epHref(h),tx=clean(a.text);if(p&&p.number>0&&!seen[p.number]){seen[p.number]=1;e.push({name:"Episodio "+p.number,url:abs(h),scanlator:"JKAnime",dateUpload:null});}if(tx&&h.includes("/genero/")&&!g.includes(tx))g.push(tx);});e.sort((a,b)=>Number(a.name.match(/\d+/)[0])-Number(b.name.match(/\d+/)[0]));let st="";d.select(".info-field").forEach(x=>{if(/estado/i.test(clean(x.text)))st=x.text;});return{title:clean(t?t.text:""),description:clean(sy?sy.text:""),author:"",genre:g,status:stat(st),episodes:e};}
-function players(html,base){const r=[],add=(u,l)=>{u=abs(dec(u).replace(/\\u002F/g,"/").replace(/\\\//g,"/"),base);if(/^https?:\/\//i.test(u)&&!r.some(x=>x.url===u))r.push({url:u,label:l||"JKAnime"});};const d=new Document(html);d.select("iframe,embed,video,source").forEach(x=>add(x.attr("src")||x.attr("data-src")||x.attr("data-url")||x.attr("data-video")||x.attr("file"),"Player"));d.select("[data-url],[data-src],[data-video],[data-iframe],[data-player]").forEach(x=>["data-url","data-src","data-video","data-iframe","data-player"].forEach(a=>add(x.attr(a),"Player")));const re=/(?:https?:)?\/\/[^"'\\\s<>]+/gi;let m;while((m=re.exec(html))!==null)if(/iframe|embed|player|video|stream|m3u8|mp4|desu|magi/i.test(m[0]))add(m[0],"Player");return r;}
-function media(html,base){const o=[],add=(u,q)=>{u=abs(dec(u).replace(/\\u002F/g,"/").replace(/\\\//g,"/"),base);if(u&&!o.some(x=>x.url===u))o.push({url:u,originalUrl:u,quality:q||"JKAnime"});};for(const re of [/<source[^>]+src=["']([^"']+)["']/gi,/(?:file|src|source)\s*[:=]\s*["']([^"']+)["']/gi,/["'](https?:\/\/[^"' ]+\.(?:m3u8|mp4)(?:\?[^"' ]*)?)["']/gi]){let m;while((m=re.exec(html))!==null)if(/\.(m3u8|mp4)(?:[?#]|$)/i.test(m[1]))add(m[1],"JKAnime");}return o;}
-async function resolve(u,ep,label){try{const r=await client.get(u,headers(ep)),m=media(r.body,u);if(m.length){m.forEach(x=>x.quality=label+" · "+x.quality);return m;}for(const p of players(r.body,u)){try{const rr=await client.get(p.url,headers(u)),n=media(rr.body,p.url);if(n.length){n.forEach(x=>x.quality=label+" · "+x.quality);return n;}}catch(_){}}}catch(_){ }return[];}
-async function getVideoList(u){const r=await client.get(u,headers(BASE_URL+"/")),ps=players(r.body,u),out=[];ps.sort((a,b)=>(/desu|magi/i.test(a.url)?0:1)-(/desu|magi/i.test(b.url)?0:1));for(const p of ps){const label=/desu/i.test(p.url)?"Desu":/magi/i.test(p.url)?"Magi":"JKAnime",m=await resolve(p.url,u,label);m.forEach(x=>{if(!out.some(y=>y.url===x.url))out.push(x);});}if(!out.length)media(r.body,u).forEach(x=>out.push(x));return out;}
-async function getFilterList(){return[];}
+const mangayomiSources = [{
+  name: "JKAnime",
+  lang: "es",
+  baseUrl: "https://jkanime.net",
+  apiUrl: "",
+  iconUrl: "https://cdn.jkanime.net/logo_jk.png",
+  typeSource: "single",
+  itemType: 1,
+  version: "0.3.0",
+  dateFormat: "",
+  dateFormatLocale: "",
+  pkgPath: "anime/src/es/jkanime.js"
+}];
+
+class DefaultExtension extends MProvider {
+  constructor() {
+    super();
+    this.client = new Client();
+  }
+
+  statusFromString(status) {
+    return {
+      "En emision": 0,
+      "Finalizado": 1,
+      "Concluido": 1,
+      "Concluido ": 1
+    }[status] ?? 5;
+  }
+
+  async parseAnimeList(url) {
+    const res = await this.client.get(url);
+    const doc = new Document(res.body);
+    const list = [];
+
+    // JKAnime exposes catalogue data in an inline `var animes` script.
+    // Older extensions attempted JSON.parse() on a regex fragment. That
+    // fragment can contain nested data and is no longer guaranteed to be a
+    // complete JSON object, which caused: SyntaxError: expecting ']'.
+    const script = doc.selectFirst("script:contains(var animes)");
+    const code = script ? script.text : "";
+
+    // Parse only the fields we need instead of JSON.parse() on the fragment.
+    for (const m of code.matchAll(/\"title\"\s*:\s*\"((?:\\.|[^\"])*)\"[\s\S]*?\"image\"\s*:\s*\"((?:\\.|[^\"])*)\"[\s\S]*?\"slug\"\s*:\s*\"((?:\\.|[^\"])*)\"/g)) {
+      const name = m[1].replace(/\\\"/g, '"');
+      const imageUrl = m[2].replace(/\\\//g, "/").replace(/\\\"/g, '"');
+      const slug = m[3].replace(/\\\//g, "/");
+      list.push({
+        name: name,
+        imageUrl: imageUrl,
+        link: `${this.source.baseUrl}/${slug}`
+      });
+    }
+
+    // DOM fallback for layouts where the inline catalogue is absent.
+    if (!list.length) {
+      for (const e of doc.select("div.portada-box, div#conb")) {
+        const a = e.selectFirst("h2 a") || e.selectFirst("a");
+        const img = e.selectFirst("img");
+        if (!a) continue;
+        const href = a.attr("href") || a.getHref || "";
+        const title = (a.attr("title") || a.text || "").trim();
+        const image = img ? (img.attr("data-src") || img.attr("data-lazy-src") || img.attr("src") || img.getSrc || "") : "";
+        if (title && href) {
+          list.push({
+            name: title,
+            imageUrl: href.startsWith("http") ? image : image,
+            link: href.startsWith("http") ? href : `${this.source.baseUrl}${href.startsWith("/") ? "" : "/"}${href}`
+          });
+        }
+      }
+    }
+
+    const nextBtn = doc.selectFirst("a.nav-next");
+    const hasNextPage = !!(nextBtn && nextBtn.text && nextBtn.text.trim() !== "");
+    return { list, hasNextPage };
+  }
+
+  async getPopular(page) {
+    const res = await this.client.get(`${this.source.baseUrl}/top/`);
+    const doc = new Document(res.body);
+    const list = [];
+
+    for (const e of doc.select("div#conb")) {
+      const a = e.selectFirst("h2 a") || e.selectFirst("a");
+      const img = e.selectFirst("img");
+      if (!a) continue;
+      let link = a.attr("href") || a.getHref || "";
+      if (link.endsWith("/")) link = link.slice(0, -1);
+      list.push({
+        name: (a.text || "").trim(),
+        imageUrl: img ? (img.attr("data-src") || img.attr("src") || img.getSrc || "") : "",
+        link: link
+      });
+    }
+
+    return { list, hasNextPage: false };
+  }
+
+  async getLatestUpdates(page) {
+    return await this.parseAnimeList(`${this.source.baseUrl}/directorio/${page}/`);
+  }
+
+  async search(query, page, filters) {
+    query = query.trim().replaceAll(/\ +/g, "_");
+
+    if (!filters || filters.length === 0) {
+      return await this.parseAnimeList(`${this.source.baseUrl}/buscar/${query}/${page}/`);
+    }
+
+    if (query) {
+      let url = `${this.source.baseUrl}/buscar/${query}/${page}/`;
+      if (filters[1]) url += `?filtro=${filters[1].values[filters[1].state].value}`;
+      if (filters[5]) url += `&tipo=${filters[5].values[filters[5].state].value}`;
+      if (filters[6]) url += `&estado=${filters[6].values[filters[6].state].value}`;
+      return await this.parseAnimeList(url);
+    }
+
+    let url = `${this.source.baseUrl}/directorio/${page}`;
+    for (let i = 1; i <= 8; i++) {
+      if (filters[i]) url += `/${filters[i].values[filters[i].state].value}`;
+    }
+    return await this.parseAnimeList(url);
+  }
+
+  async getDetail(url) {
+    const res = await this.client.get(url);
+    const doc = new Document(res.body);
+    const detail = {};
+
+    const idMatch = res.body.match(/data-anime="(\d+)"/);
+    const info = doc.selectFirst("div.anime__details__content");
+    const extInfo = doc.selectFirst("div.aninfo");
+
+    if (info) {
+      detail.name = info.selectFirst("h3")?.text || "";
+      detail.imageUrl = info.selectFirst("div.anime__details__pic")?.attr("data-setbg") || "";
+      detail.description = (info.selectFirst("p.sinopsis")?.text || "").trim();
+    }
+
+    if (extInfo) {
+      const statusEl = extInfo.selectFirst("span:contains(Estado) + span");
+      detail.status = this.statusFromString(statusEl ? statusEl.text : "");
+      detail.genre = extInfo.select("li:contains(Genero) a").map(e => e.text);
+      detail.author = extInfo.select("li:contains(Studios) a").map(e => e.text).join(", ");
+    } else {
+      detail.status = 5;
+      detail.genre = [];
+      detail.author = "";
+    }
+
+    detail.episodes = [];
+
+    if (idMatch) {
+      try {
+        const last = await this.client.get(`${this.source.baseUrl}/ajax/last_episode/${idMatch[1]}`, {"User-Agent": "Mangayomi"});
+        const parsed = JSON.parse(last.body);
+        const end = parsed && parsed[0] ? parseInt(parsed[0].number) : 0;
+        for (let i = 1; i <= end; i++) {
+          detail.episodes.push({ name: `Episodio ${i}`, url: `${url.replace(/\/$/, "")}/${i}` });
+        }
+        detail.episodes.reverse();
+      } catch (_) {
+        // Episode API can be temporarily unavailable. Keep the detail page usable.
+      }
+    }
+
+    return detail;
+  }
+
+  async extractRedirect(redirect, referer, lang, type, host) {
+    try {
+      const res = await this.client.get(this.source.baseUrl + redirect, {"Referer": referer});
+      const match = res.body.match(/https?:\/\/[^\"'\s]+?\.m3u8[^\"'\s]*/i);
+      if (!match) return [];
+      return [{
+        url: match[0],
+        originalUrl: match[0],
+        headers: {"Referer": referer},
+        quality: `${lang} ${type} ${host}`
+      }];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  async getVideoList(url) {
+    const res = await this.client.get(url);
+    const doc = new Document(res.body);
+    const videos = [];
+    const codeEl = doc.selectFirst("script:contains(var video)");
+    const code = codeEl ? codeEl.text : "";
+
+    // Current JKAnime exposes Desu as a redirect to an m3u8 playlist.
+    for (const m of code.matchAll(/video\s*\[\d+\].*?src="(.*?)"/g)) {
+      const found = await this.extractRedirect(m[1], url, "Español", "Sub", "Desu");
+      videos.push(...found);
+    }
+
+    // Some servers are exposed as base64 encoded remote URLs. Resolve only
+    // servers for which the URL itself is already a playable media resource.
+    for (const m of code.matchAll(/\{"remote"\s*:\s*"(.*?)".*?"server"\s*:\s*"(.*?)"/g)) {
+      try {
+        const link = Uint8Array.fromBase64(m[1]).decode("utf-8");
+        const host = m[2];
+        if (/\.m3u8(?:\?|$)|\.mp4(?:\?|$)/i.test(link)) {
+          videos.push({url: link, originalUrl: link, quality: `Español Sub ${host}`});
+        }
+      } catch (_) {}
+    }
+
+    // Generic iframe/source fallback.
+    if (!videos.length) {
+      for (const el of doc.select("iframe, video, source")) {
+        const src = el.attr("src") || el.attr("data-src") || el.attr("data-url") || "";
+        if (!src) continue;
+        if (/\.(m3u8|mp4)(?:\?|$)/i.test(src)) {
+          videos.push({url: src, originalUrl: src, quality: "JKAnime"});
+        }
+      }
+    }
+
+    return videos;
+  }
+
+  getFilterList() {
+    return [];
+  }
+}
