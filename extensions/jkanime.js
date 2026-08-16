@@ -1,124 +1,17 @@
-const mangayomiSources = [{
-  name: "JKAnime Comunidad",
-  lang: "es",
-  baseUrl: "https://jkanime.net",
-  apiUrl: "",
-  iconUrl: "https://cdn.jkanime.net/logo_jk.png",
-  typeSource: "single",
-  itemType: 1,
-  id: 9000000102,
-  version: "0.4.0",
-  dateFormat: "",
-  dateFormatLocale: "",
-  pkgPath: "anime/src/es/jkanime.js"
-}];
+const mangayomiSources=[{name:"JKAnime Comunidad",lang:"es",baseUrl:"https://jkanime.net",apiUrl:"",iconUrl:"https://cdn.jkanime.net/logo_jk.png",typeSource:"single",itemType:1,id:9000000102,version:"0.5.0",dateFormat:"",dateFormatLocale:"",pkgPath:"anime/src/es/jkanime.js"}];
 
-class DefaultExtension extends MProvider {
-  constructor() { super(); this.client = new Client(); }
-  statusFromString(status) { return {"En emision":0,"Finalizado":1,"Concluido":1,"Concluido ":1}[status] ?? 5; }
-
-  async parseAnimeList(url) {
-    const res = await this.client.get(url);
-    const doc = new Document(res.body);
-    const list = [];
-    const script = doc.selectFirst("script:contains(var animes)");
-    const code = script ? script.text : "";
-
-    // Never JSON.parse() a regex fragment: JKAnime's catalogue objects can
-    // contain nested arrays/objects and that caused "expecting ]" errors.
-    for (const m of code.matchAll(/\"title\"\s*:\s*\"((?:\\.|[^\"])*)\"[\s\S]*?\"image\"\s*:\s*\"((?:\\.|[^\"])*)\"[\s\S]*?\"slug\"\s*:\s*\"((?:\\.|[^\"])*)\"/g)) {
-      const name = m[1].replace(/\\\"/g,'"');
-      const imageUrl = m[2].replace(/\\\//g,"/").replace(/\\\"/g,'"');
-      const slug = m[3].replace(/\\\//g,"/");
-      list.push({name,imageUrl,link:`${this.source.baseUrl}/${slug}`});
-    }
-
-    // HTML fallback for catalogue layouts without the inline variable.
-    if (!list.length) {
-      for (const e of doc.select("div.portada-box, div#conb")) {
-        const a=e.selectFirst("h2 a")||e.selectFirst("a"), img=e.selectFirst("img");
-        if(!a) continue;
-        let link=a.attr("href")||a.getHref||"";
-        if(!link) continue;
-        if(!link.startsWith("http")) link=`${this.source.baseUrl}${link.startsWith("/")?"":"/"}${link}`;
-        const name=(a.attr("title")||a.text||"").trim();
-        const imageUrl=img?(img.attr("data-src")||img.attr("data-lazy-src")||img.attr("src")||img.getSrc||""):"";
-        if(name) list.push({name,imageUrl,link});
-      }
-    }
-    const nextBtn=doc.selectFirst("a.nav-next");
-    return {list,hasNextPage:!!(nextBtn&&nextBtn.text&&nextBtn.text.trim()!=="")};
-  }
-
-  async getPopular(page) {
-    const res=await this.client.get(`${this.source.baseUrl}/top/`),doc=new Document(res.body),list=[];
-    for(const e of doc.select("div#conb")){
-      const a=e.selectFirst("h2 a")||e.selectFirst("a"),img=e.selectFirst("img");
-      if(!a)continue;
-      let link=a.attr("href")||a.getHref||""; if(link.endsWith("/"))link=link.slice(0,-1);
-      list.push({name:(a.text||"").trim(),imageUrl:img?(img.attr("data-src")||img.attr("src")||img.getSrc||""):"",link});
-    }
-    return {list,hasNextPage:false};
-  }
-
-  async getLatestUpdates(page){return await this.parseAnimeList(`${this.source.baseUrl}/directorio/${page}/`);}
-
-  async search(query,page,filters){
-    query=query.trim().replaceAll(/\ +/g,"_");
-    if(!filters||filters.length===0)return await this.parseAnimeList(`${this.source.baseUrl}/buscar/${query}/${page}/`);
-    if(query){
-      let u=`${this.source.baseUrl}/buscar/${query}/${page}/`;
-      if(filters[1])u+=`?filtro=${filters[1].values[filters[1].state].value}`;
-      if(filters[5])u+=`&tipo=${filters[5].values[filters[5].state].value}`;
-      if(filters[6])u+=`&estado=${filters[6].values[filters[6].state].value}`;
-      return await this.parseAnimeList(u);
-    }
-    let u=`${this.source.baseUrl}/directorio/${page}`;
-    for(let i=1;i<=8;i++)if(filters[i])u+=`/${filters[i].values[filters[i].state].value}`;
-    return await this.parseAnimeList(u);
-  }
-
-  async getDetail(url){
-    const res=await this.client.get(url),doc=new Document(res.body),detail={};
-    const idMatch=res.body.match(/data-anime="(\d+)"/),info=doc.selectFirst("div.anime__details__content"),ext=doc.selectFirst("div.aninfo");
-    detail.name=info?.selectFirst("h3")?.text||"";
-    detail.imageUrl=info?.selectFirst("div.anime__details__pic")?.attr("data-setbg")||"";
-    detail.description=(info?.selectFirst("p.sinopsis")?.text||"").trim();
-    detail.status=this.statusFromString(ext?.selectFirst("span:contains(Estado) + span")?.text||"");
-    detail.genre=ext?ext.select("li:contains(Genero) a").map(e=>e.text):[];
-    detail.author=ext?ext.select("li:contains(Studios) a").map(e=>e.text).join(", "):"";
-    detail.episodes=[];
-    if(idMatch)try{
-      const r=await this.client.get(`${this.source.baseUrl}/ajax/last_episode/${idMatch[1]}`,{"User-Agent":"Mangayomi"});
-      const a=JSON.parse(r.body),end=a&&a[0]?parseInt(a[0].number):0;
-      for(let i=1;i<=end;i++)detail.episodes.push({name:`Episodio ${i}`,url:`${url.replace(/\/$/,"")}/${i}`});
-      detail.episodes.reverse();
-    }catch(_){ }
-    return detail;
-  }
-
-  async extractRedirect(redirect,referer,lang,type,host){
-    try{
-      const r=await this.client.get(this.source.baseUrl+redirect,{"Referer":referer});
-      const m=r.body.match(/https?:\/\/[^\"'\s]+?\.m3u8[^\"'\s]*/i);
-      return m?[{url:m[0],originalUrl:m[0],headers:{"Referer":referer},quality:`${lang} ${type} ${host}`}]:[];
-    }catch(_){return[];}
-  }
-
-  async getVideoList(url){
-    const res=await this.client.get(url),doc=new Document(res.body),videos=[];
-    const el=doc.selectFirst("script:contains(var video)"),code=el?el.text:"";
-    for(const m of code.matchAll(/video\s*\[\d+\].*?src="(.*?)"/g))videos.push(...await this.extractRedirect(m[1],url,"Español","Sub","Desu"));
-    for(const m of code.matchAll(/\{"remote"\s*:\s*"(.*?)".*?"server"\s*:\s*"(.*?)"/g))try{
-      const link=Uint8Array.fromBase64(m[1]).decode("utf-8"),host=m[2];
-      if(/\.(m3u8|mp4)(?:\?|$)/i.test(link))videos.push({url:link,originalUrl:link,quality:`Español Sub ${host}`});
-    }catch(_){ }
-    if(!videos.length)for(const e of doc.select("iframe,video,source")){
-      const src=e.attr("src")||e.attr("data-src")||e.attr("data-url")||"";
-      if(/\.(m3u8|mp4)(?:\?|$)/i.test(src))videos.push({url:src,originalUrl:src,quality:"JKAnime"});
-    }
-    return videos;
-  }
-
-  getFilterList(){return[];}
+class DefaultExtension extends MProvider{
+ constructor(){super();this.client=new Client();}
+ clean(s){return(s||"").replace(/\s+/g," ").trim();}
+ abs(u){if(!u)return"";if(/^https?:\/\//i.test(u))return u;if(u.startsWith("//"))return"https:"+u;if(u.startsWith("/"))return this.source.baseUrl+u;return this.source.baseUrl+"/"+u;}
+ async getDoc(url,ref){const r=await this.client.get(url,{"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36","Referer":ref||this.source.baseUrl+"/"});return new Document(r.body);}
+ card(e){const a=e.selectFirst("a[href]");if(!a)return null;const h=a.attr("href")||"";const link=this.abs(h);if(!/^https?:\/\/jkanime\.net\/[^/?#]+\/?$/i.test(link))return null;const name=this.clean(a.attr("title")||a.text);if(!name)return null;const img=e.selectFirst("img");return{name,imageUrl:img?(img.attr("data-src")||img.attr("data-lazy-src")||img.attr("src")||""):"",link};}
+ async htmlList(url){const d=await this.getDoc(url),out=[],seen={};const selectors=["div.portada-box","div#conb","article",".item"];for(const sel of selectors)for(const e of d.select(sel)){const x=this.card(e);if(x&&!seen[x.link]){seen[x.link]=1;out.push(x);}}if(!out.length){for(const a of d.select("h5 a[href],h4 a[href],h3 a[href]")){const h=a.attr("href")||"",link=this.abs(h);if(!/^https?:\/\/jkanime\.net\/[^/?#]+\/?$/i.test(link))continue;const name=this.clean(a.attr("title")||a.text);if(name&&!seen[link]){seen[link]=1;let p=a.parent();const im=p?p.selectFirst("img"):null;out.push({name,imageUrl:im?(im.attr("data-src")||im.attr("src")||""):"",link});}}}return{list:out,hasNextPage:out.length>0};}
+ async getPopular(page){return await this.htmlList(page&&page>1?`${this.source.baseUrl}/top/${page}/`:this.source.baseUrl+"/top/");}
+ async getLatestUpdates(page){return await this.htmlList(page&&page>1?`${this.source.baseUrl}/directorio/${page}/`:this.source.baseUrl+"/directorio/");}
+ async search(query,page){const q=this.clean(query).replace(/\s+/g,"_");const url=`${this.source.baseUrl}/buscar/${encodeURIComponent(q)}/`;return await this.htmlList(url);}
+ async getDetail(url){const d=await this.getDoc(url),nameEl=d.selectFirst("h1")||d.selectFirst("h2"),syn=d.selectFirst(".sinopsis-box p")||d.selectFirst("p.sinopsis")||d.selectFirst("#ainfo p");const detail={name:this.clean(nameEl?nameEl.text:""),link:url,imageUrl:"",description:this.clean(syn?syn.text:""),author:"",artist:"",genre:[],status:5,episodes:[]};const cover=d.selectFirst("img");if(cover)detail.imageUrl=cover.attr("data-src")||cover.attr("data-lazy-src")||cover.attr("src")||"";d.select("a[href*='/genero/']").forEach(a=>{const g=this.clean(a.text);if(g&&!detail.genre.includes(g))detail.genre.push(g);});const seen={};d.select("a[href]").forEach(a=>{const h=a.attr("href")||"",m=h.match(/\/([^/?#]+)\/(\d+)\/?$/);if(!m)return;const n=Number(m[2]);if(n>0&&n<10000&&!seen[n]){seen[n]=1;detail.episodes.push({name:`Episodio ${n}`,url:this.abs(h),scanlator:"JKAnime"});}});detail.episodes.sort((a,b)=>Number(a.name.match(/\d+/)[0])-Number(b.name.match(/\d+/)[0]));return detail;}
+ media(html,base){const out=[],add=u=>{if(!u)return;u=u.replace(/&amp;/g,"&").replace(/\\\//g,"/");if(!/^https?:/i.test(u))return;if(/\.(?:m3u8|mp4)(?:[?#]|$)/i.test(u)&&!out.some(x=>x.url===u))out.push({url:u,originalUrl:u,quality:"JKAnime"});};let m;for(const r of [/<source[^>]+src=["']([^"']+)["']/gi,/(?:file|src|source)\s*[:=]\s*["']([^"']+)["']/gi,/(["'])(https?:\/\/[^"' ]+\.(?:m3u8|mp4)(?:\?[^"' ]*)?)\1/gi])while((m=r.exec(html)))add(m[2]||m[1]);return out;}
+ async getVideoList(url){const r=await this.client.get(url,{"User-Agent":"Mozilla/5.0","Referer":this.source.baseUrl+"/"});let out=this.media(r.body,url);const d=new Document(r.body);const refs=[];d.select("iframe,embed,video,source,[data-src],[data-url],[data-player]").forEach(e=>{const u=e.attr("src")||e.attr("data-src")||e.attr("data-url")||e.attr("data-player");if(u&&!refs.includes(u))refs.push(u);});for(const u of refs){try{const rr=await this.client.get(this.abs(u),{"User-Agent":"Mozilla/5.0","Referer":url});for(const v of this.media(rr.body,this.abs(u)))if(!out.some(x=>x.url===v.url))out.push(v);}catch(_){}}return out;}
+ getFilterList(){return[];}
 }
